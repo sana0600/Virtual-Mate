@@ -88,7 +88,8 @@ Never commit your real `.env` file — only `.env.example` is tracked in this re
 
 ## 🌍 Live Demo
 
-> _Add your deployed URL here once hosted, e.g._ `https://virtual-mate.onrender.com`
+[https://virtual-mate-z4xr.onrender.com]
+[https://huggingface.co/spaces/sana0600/Virtual-Mate]
 
 ## 📄 License
 
