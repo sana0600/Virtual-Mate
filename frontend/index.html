@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>VIRTUAL-MATE</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="icon" type="image/png" href="/static/images/VirtualMate_icon.png">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+
+    <!-- Navigation -->
+    <nav>
+        <div class="nav-brand">
+            <div class="nav-icon">
+                <img src="/static/images/VirtualMate_icon.png"
+                     alt="VirtualMate Icon"
+                     class="nav-icon-img">
+            </div>
+
+            <span>VIRTUAL-MATE</span>
+            <span class="nav-badge">v1.0</span>
+        </div>
+
+        <div class="nav-right">
+            <div class="api-url-wrap">
+                <span class="status-dot" id="sdot"></span>
+                <span>API:</span>
+                <input
+                    type="text"
+                    id="api-base"
+                />
+            </div>
+        </div>
+    </nav>
+
+    <div class="app">
+
+        <!-- Sidebar -->
+        <aside class="sidebar">
+
+            <div class="sidebar-label">
+                Example tasks
+            </div>
+
+            <button class="ex-btn"
+                onclick="fillTask(this,'Search for reasons why kids are addicted to mobiles and create a PDF report')">
+                📄 Kids & mobile addiction PDF
+            </button>
+
+            <button class="ex-btn"
+                onclick="fillTask(this,'Research the top 5 programming languages in 2026 and generate an Excel comparison sheet')">
+                📊 Programming languages Excel
+            </button>
+
+            <button class="ex-btn"
+                onclick="fillTask(this,'Draft a professional email to HP requesting a laptop quotation for 10 units')">
+                📧 Laptop quotation email
+            </button>
+
+            <button class="ex-btn"
+                onclick="fillTask(this,'Analyse the cause and the effects of fuel shortage in India and other countries in 2026 and generate a document on it')">
+                📄 Cause and Effects of Fuel Shortage Document
+            </button>
+
+        </aside>
+
+        <!-- Main -->
+        <div class="main" id="main-scroll">
+
+            <!-- Task Input -->
+            <div class="card">
+
+                <div class="card-title">
+                    Enter your task
+                </div>
+
+                <textarea
+                    id="task-input"
+                    placeholder="Enter task..."
+                ></textarea>
+
+                <div class="btn-row">
+
+                    <button
+                        class="btn-primary"
+                        id="exec-btn"
+                        onclick="runTask()">
+                        Execute Task
+                    </button>
+
+                    <button
+                        class="btn-secondary"
+                        onclick="resetAll()">
+                        Reset
+                    </button>
+
+                </div>
+
+            </div>
+
+            <!-- PLAN -->
+            <div class="card section-hidden" id="plan-section">
+                <div class="card-title">
+                    Generated Plan
+                </div>
+
+                <div id="plan-steps"></div>
+            </div>
+
+            <!-- LOG -->
+            <div class="card section-hidden" id="log-section">
+                <div class="card-title">
+                    Agent Activity Log
+                </div>
+
+                <div id="log-list"></div>
+            </div>
+
+            <!-- RESULTS -->
+            <div class="card section-hidden" id="results-section">
+                <div class="card-title">
+                    Execution Results
+                </div>
+
+                <div id="result-items"></div>
+            </div>
+
+            <!-- REPORT PREVIEW (FOR NO FILES)-->
+            <section id="report-section" class="card section-hidden">
+            <div class="section-header">
+            <h2>Report Preview</h2>
+                <button
+                    id="copy-response-btn"
+                    class="copy-btn hidden"
+                    type="button">
+                    📋 Copy Response
+                </button>
+            </div>
+
+            <div id="report-preview-box"></div>
+            </section>
+            <!-- DOWNLOADS -->
+            <section id="files-section" class="card section-hidden">
+            <div class="section-header">
+                <h2>Generated Files</h2>
+            </div>
+
+            <div id="generated-files-list"></div>
+            </section>
+
+            <!-- EMAIL -->
+            <section id="email-section" class="card section-hidden">
+            <div class="section-header">
+                <h2>Email Preview</h2>
+                <button
+                    id="copy-email-btn"
+                    class="copy-btn section-hidden"
+                    type="button">
+                    📋 Copy Email
+                </button>
+            </div>
+
+            <div id="email-preview-box"></div>
+            </section>
+
+            <!-- RAW -->
+            <div class="card section-hidden" id="raw-section">
+                <div class="card-title">
+                    Raw API Response
+                </div>
+
+                <div class="raw-output" id="raw-output"></div>
+            </div>
+
+            <div class="error-box section-hidden" id="error-box">
+                <div id="error-msg"></div>
+            </div>
+
+        </div>
+
+    </div>
+
+    <script src="/static/app.js"></script>
+
+</body>
+</html>
