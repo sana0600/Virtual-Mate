@@ -97,8 +97,7 @@ Never commit your real `.env` file - only `.env.example` is tracked in this repo
 
 ## 🌍 Live Demo
 
-[https://virtual-mate-z4xr.onrender.com]
-[https://huggingface.co/spaces/sana0600/Virtual-Mate]
+[https://virtual-mate-66cf.onrender.com/]
 
 ## 📄 License
 
