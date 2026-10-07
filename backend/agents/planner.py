@@ -1,63 +1,83 @@
-from langchain_groq import ChatGroq
-from dotenv import load_dotenv
-import os
-import json
+from enum import Enum
 
-load_dotenv()
+from pydantic import BaseModel, Field, ValidationError
 
-llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
-    groq_api_key=os.getenv("GROQ_API_KEY")
-)
+try:
+    from ..config import get_llm, map_provider_error
+    from ..errors import AppError, PlanningError
+except ImportError:  # Support imports when backend/ is the working directory.
+    from config import get_llm, map_provider_error
+    from errors import AppError, PlanningError
 
 
-def generate_plan(task: str):
+class ActionType(str, Enum):
+    WEB_SEARCH = "web_search"
+    SUMMARIZE = "summarize"
+    DRAFT_EMAIL = "draft_email"
+    CREATE_PDF = "create_pdf"
+    CREATE_DOCX = "create_docx"
+    CREATE_XLSX = "create_xlsx"
+
+
+class PlannedAction(BaseModel):
+    type: ActionType
+    instruction: str = Field(min_length=1, max_length=500)
+
+
+class PlanStep(BaseModel):
+    step: int = Field(ge=1)
+    subtask: str = Field(min_length=1, max_length=300)
+    actions: list[PlannedAction] = Field(min_length=1)
+
+
+class PlanResponse(BaseModel):
+    steps: list[PlanStep] = Field(min_length=1, max_length=12)
+
+
+def generate_plan(task: str) -> list[PlanStep]:
     prompt = f"""
-    Rules:
-- Only include actions an AI software agent can perform.
-- Do NOT include physical/manual/human tasks.
-- Do NOT include unrealistic steps like interviews/consulting/opening apps.
-- Keep actions concise and tool-friendly.
+You are an AI workplace planner. Convert the task into executable actions.
 
-IMPORTANT RULES:
-- If task asks for research/information/search:
-  ALWAYS include explicit research step first.
+Rules:
+- Use only these action types: web_search, summarize, draft_email,
+  create_pdf, create_docx, create_xlsx.
+- Include web_search before summarize when current or researched information
+  is required.
+- Include summarize before a document action when research was performed.
+- Use exactly the requested document type.
+- For email tasks, use draft_email. This application drafts but does not send.
+- Do not include physical, manual, consultation, delivery, or send-email steps.
+- Keep the plan concise and preserve the user's requested outcome.
 
-- If task asks for document/pdf/excel/report:
-  ALWAYS include create/generate/export action.
+Task: {task}
+"""
 
-- If task asks for email:
-  ALWAYS include draft email action before send email.
-  
-  If task asks for excel/sheet:
-Return tabular format.
-If task asks for pdf/doc:
-Return report format.
-If task asks for email:
-Return professional email format.
+    try:
+        planner = get_llm().with_structured_output(
+            PlanResponse,
+            method="json_schema",
+        )
+    except AppError:
+        raise
+    except Exception as exc:
+        raise map_provider_error(exc) from exc
 
-You are an AI workplace planner.
+    last_error = None
+    for attempt in range(2):
+        try:
+            response = planner.invoke(prompt)
+            if isinstance(response, PlanResponse):
+                return response.steps
+            return PlanResponse.model_validate(response).steps
+        except ValidationError as exc:
+            last_error = exc
+        except AppError:
+            raise
+        except Exception as exc:
+            message = str(exc).lower()
+            if attempt == 0 and ("schema" in message or "failed_generation" in message):
+                last_error = exc
+                continue
+            raise map_provider_error(exc) from exc
 
-Break the given task into structured subtasks.
-
-Return ONLY valid JSON in this format:
-
-[
-    {{
-        "step": 1,
-        "subtask": "Subtask Name",
-        "actions": [
-            "Action 1",
-            "Action 2"
-        ]
-    }}
-]
-
-    Task: {task}
-    """
-
-    response = llm.invoke(prompt)
-
-    cleaned = response.content.replace("```json", "").replace("```", "").strip()
-
-    return json.loads(cleaned)
+    raise PlanningError("The AI provider returned an invalid task plan.") from last_error

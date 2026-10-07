@@ -34,6 +34,9 @@
                 <input
                     type="text"
                     id="api-base"
+                    readonly
+                    aria-readonly="true"
+                    title="API endpoint is set automatically and is just for display."
                 />
             </div>
         </div>
@@ -49,17 +52,17 @@
             </div>
 
             <button class="ex-btn"
-                onclick="fillTask(this,'Search for reasons why kids are addicted to mobiles and create a PDF report')">
+                onclick="fillTask(this,'Search for reasons why kids are getting addicted to mobiles and create a PDF report')">
                 📄 Kids & mobile addiction PDF
             </button>
 
             <button class="ex-btn"
-                onclick="fillTask(this,'Research the top 5 programming languages in 2026 and generate an Excel comparison sheet')">
+                onclick="fillTask(this,'Research the top 15 programming languages in 2026 and generate an Excel comparison sheet')">
                 📊 Programming languages Excel
             </button>
 
             <button class="ex-btn"
-                onclick="fillTask(this,'Draft a professional email to HP requesting a laptop quotation for 10 units')">
+                onclick="fillTask(this,'Draft a professional email to HP requesting a laptop quotation for 1000 units')">
                 📧 Laptop quotation email
             </button>
 
@@ -67,6 +70,15 @@
                 onclick="fillTask(this,'Analyse the cause and the effects of fuel shortage in India and other countries in 2026 and generate a document on it')">
                 📄 Cause and Effects of Fuel Shortage Document
             </button>
+
+            <!-- Agent activity log. -->
+            <div class="sidebar-log section-hidden" id="log-section">
+                <div class="sidebar-label log-label">
+                    Agent Activity Log
+                </div>
+
+                <div id="log-list"></div>
+            </div>
 
         </aside>
 
@@ -96,13 +108,56 @@
 
                     <button
                         class="btn-secondary"
-                        onclick="resetAll()">
+                        onclick="resetAll(true)">
                         Reset
                     </button>
 
                 </div>
 
             </div>
+
+            <div class="error-box section-hidden" id="error-box">
+                <div id="error-msg"></div>
+            </div>
+
+            <!-- Primary answer: always the first block below the prompt. -->
+            <section id="report-section" class="card section-hidden">
+                <div class="section-header">
+                    <h2>Report Preview</h2>
+                    <button
+                        id="copy-response-btn"
+                        class="copy-btn section-hidden"
+                        type="button">
+                        📋 Copy Response
+                    </button>
+                </div>
+
+                <div id="report-preview-box" class="formatted-response"></div>
+            </section>
+
+            <!-- Email is also a primary answer and remains near the prompt. -->
+            <section id="email-section" class="card section-hidden">
+                <div class="section-header">
+                    <h2>Email Preview</h2>
+                    <button
+                        id="copy-email-btn"
+                        class="copy-btn section-hidden"
+                        type="button">
+                        📋 Copy Email
+                    </button>
+                </div>
+
+                <div id="email-preview-box"></div>
+            </section>
+
+            <!-- Generated output is placed before diagnostic details. -->
+            <section id="files-section" class="card section-hidden">
+                <div class="section-header">
+                    <h2>Generated Files</h2>
+                </div>
+
+                <div id="generated-files-list"></div>
+            </section>
 
             <!-- PLAN -->
             <div class="card section-hidden" id="plan-section">
@@ -111,15 +166,6 @@
                 </div>
 
                 <div id="plan-steps"></div>
-            </div>
-
-            <!-- LOG -->
-            <div class="card section-hidden" id="log-section">
-                <div class="card-title">
-                    Agent Activity Log
-                </div>
-
-                <div id="log-list"></div>
             </div>
 
             <!-- RESULTS -->
@@ -131,44 +177,6 @@
                 <div id="result-items"></div>
             </div>
 
-            <!-- REPORT PREVIEW (FOR NO FILES)-->
-            <section id="report-section" class="card section-hidden">
-            <div class="section-header">
-            <h2>Report Preview</h2>
-                <button
-                    id="copy-response-btn"
-                    class="copy-btn hidden"
-                    type="button">
-                    📋 Copy Response
-                </button>
-            </div>
-
-            <div id="report-preview-box"></div>
-            </section>
-            <!-- DOWNLOADS -->
-            <section id="files-section" class="card section-hidden">
-            <div class="section-header">
-                <h2>Generated Files</h2>
-            </div>
-
-            <div id="generated-files-list"></div>
-            </section>
-
-            <!-- EMAIL -->
-            <section id="email-section" class="card section-hidden">
-            <div class="section-header">
-                <h2>Email Preview</h2>
-                <button
-                    id="copy-email-btn"
-                    class="copy-btn section-hidden"
-                    type="button">
-                    📋 Copy Email
-                </button>
-            </div>
-
-            <div id="email-preview-box"></div>
-            </section>
-
             <!-- RAW -->
             <div class="card section-hidden" id="raw-section">
                 <div class="card-title">
@@ -176,10 +184,6 @@
                 </div>
 
                 <div class="raw-output" id="raw-output"></div>
-            </div>
-
-            <div class="error-box section-hidden" id="error-box">
-                <div id="error-msg"></div>
             </div>
 
         </div>

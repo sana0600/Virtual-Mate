@@ -1,28 +1,22 @@
-const API = () =>
-    document.getElementById("api-base").value.replace(/\/$/, "");
+const API = () => document.getElementById("api-base").value.replace(/\/$/, "");
 
 document.getElementById("api-base").value = window.location.origin;
 
-/* =========================
-STATUS CHECK
-========================= */
 async function checkStatus() {
     const dot = document.getElementById("sdot");
-
     try {
-        const res = await fetch(API() + "/");
-        dot.className = res.ok ? "status-dot online" : "status-dot offline";
+        const response = await fetch(API() + "/health");
+        dot.className = response.ok ? "status-dot online" : "status-dot offline";
+        dot.title = response.ok ? "API ready" : "API is missing required configuration";
     } catch {
         dot.className = "status-dot offline";
+        dot.title = "API unavailable";
     }
 }
 
 checkStatus();
 setInterval(checkStatus, 10000);
 
-/* =========================
-HELPERS
-========================= */
 function show(id) {
     document.getElementById(id).classList.remove("section-hidden");
 }
@@ -31,344 +25,403 @@ function hide(id) {
     document.getElementById(id).classList.add("section-hidden");
 }
 
-function escapeHtml(text) {
-    if (!text) return "";
-    return String(text)
+function escapeHtml(value) {
+    return String(value ?? "")
         .replace(/&/g, "&amp;")
         .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+function formatInlineMarkdown(value) {
+    const codeSegments = [];
+    let formatted = escapeHtml(value).replace(/`([^`]+)`/g, (_match, code) => {
+        const token = `@@VM_CODE_${codeSegments.length}@@`;
+        codeSegments.push(`<code>${code}</code>`);
+        return token;
+    });
+
+    formatted = formatted
+        .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+        .replace(/__(.+?)__/g, "<strong>$1</strong>")
+        .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>");
+
+    codeSegments.forEach((code, index) => {
+        formatted = formatted.replace(`@@VM_CODE_${index}@@`, code);
+    });
+    return formatted;
+}
+
+function tableCells(line) {
+    return line.trim().replace(/^\||\|$/g, "").split("|").map(cell => cell.trim());
+}
+
+function isTableRow(line) {
+    const trimmed = line.trim();
+    return trimmed.startsWith("|") && trimmed.endsWith("|");
+}
+
+function isTableSeparator(line) {
+    return isTableRow(line) && tableCells(line).every(cell => /^:?-{3,}:?$/.test(cell));
+}
+
+function tableAlignment(marker) {
+    if (marker.startsWith(":") && marker.endsWith(":")) return "center";
+    if (marker.endsWith(":")) return "right";
+    return "left";
+}
+
+function isMarkdownBlockStart(lines, index) {
+    const line = lines[index] || "";
+    const trimmed = line.trim();
+    return /^#{1,6}\s+/.test(trimmed)
+        || /^([-*_])\1{2,}$/.test(trimmed.replace(/\s/g, ""))
+        || /^[-*+]\s+/.test(trimmed)
+        || /^\d+[.)]\s+/.test(trimmed)
+        || /^>\s?/.test(trimmed)
+        || (isTableRow(line) && isTableSeparator(lines[index + 1] || ""));
+}
+
+function markdownToHtml(markdown) {
+    const lines = String(markdown ?? "").replace(/\r\n?/g, "\n").split("\n");
+    const output = [];
+    let index = 0;
+
+    while (index < lines.length) {
+        const line = lines[index];
+        const trimmed = line.trim();
+
+        if (!trimmed) {
+            index += 1;
+            continue;
+        }
+
+        if (isTableRow(line) && isTableSeparator(lines[index + 1] || "")) {
+            const headings = tableCells(line);
+            const markers = tableCells(lines[index + 1]);
+            const alignments = markers.map(tableAlignment);
+            index += 2;
+            const rows = [];
+            while (index < lines.length && isTableRow(lines[index])) {
+                rows.push(tableCells(lines[index]));
+                index += 1;
+            }
+            output.push(`
+                <div class="response-table-wrap">
+                    <table>
+                        <thead><tr>${headings.map((cell, cellIndex) =>
+                            `<th style="text-align:${alignments[cellIndex] || "left"}">${formatInlineMarkdown(cell)}</th>`
+                        ).join("")}</tr></thead>
+                        <tbody>${rows.map(row => `<tr>${row.map((cell, cellIndex) =>
+                            `<td style="text-align:${alignments[cellIndex] || "left"}">${formatInlineMarkdown(cell)}</td>`
+                        ).join("")}</tr>`).join("")}</tbody>
+                    </table>
+                </div>
+            `);
+            continue;
+        }
+
+        const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
+        if (heading) {
+            const level = heading[1].length;
+            output.push(`<h${level}>${formatInlineMarkdown(heading[2])}</h${level}>`);
+            index += 1;
+            continue;
+        }
+
+        if (/^([-*_])\1{2,}$/.test(trimmed.replace(/\s/g, ""))) {
+            output.push("<hr>");
+            index += 1;
+            continue;
+        }
+
+        if (/^[-*+]\s+/.test(trimmed)) {
+            const items = [];
+            while (index < lines.length && /^[-*+]\s+/.test(lines[index].trim())) {
+                items.push(lines[index].trim().replace(/^[-*+]\s+/, ""));
+                index += 1;
+            }
+            output.push(`<ul>${items.map(item => `<li>${formatInlineMarkdown(item)}</li>`).join("")}</ul>`);
+            continue;
+        }
+
+        if (/^\d+[.)]\s+/.test(trimmed)) {
+            const items = [];
+            while (index < lines.length && /^\d+[.)]\s+/.test(lines[index].trim())) {
+                items.push(lines[index].trim().replace(/^\d+[.)]\s+/, ""));
+                index += 1;
+            }
+            output.push(`<ol>${items.map(item => `<li>${formatInlineMarkdown(item)}</li>`).join("")}</ol>`);
+            continue;
+        }
+
+        if (/^>\s?/.test(trimmed)) {
+            const quotes = [];
+            while (index < lines.length && /^>\s?/.test(lines[index].trim())) {
+                quotes.push(lines[index].trim().replace(/^>\s?/, ""));
+                index += 1;
+            }
+            output.push(`<blockquote>${quotes.map(formatInlineMarkdown).join("<br>")}</blockquote>`);
+            continue;
+        }
+
+        const paragraph = [trimmed];
+        index += 1;
+        while (
+            index < lines.length
+            && lines[index].trim()
+            && !isMarkdownBlockStart(lines, index)
+        ) {
+            paragraph.push(lines[index].trim());
+            index += 1;
+        }
+        output.push(`<p>${paragraph.map(formatInlineMarkdown).join("<br>")}</p>`);
+    }
+
+    return output.join("");
+}
+
+function renderFormattedText(container, text) {
+    container.innerHTML = markdownToHtml(text);
 }
 
 function showToast(message) {
-
     const toast = document.createElement("div");
-
     toast.className = "toast";
     toast.textContent = message;
-
     document.body.appendChild(toast);
-
-    // animate in
+    setTimeout(() => toast.classList.add("show"), 10);
     setTimeout(() => {
-        toast.classList.add("show");
-    }, 10);
-
-    // animate out
-    setTimeout(() => {
-
         toast.classList.remove("show");
-
-        setTimeout(() => {
-            toast.remove();
-        }, 300);
-
+        setTimeout(() => toast.remove(), 300);
     }, 2000);
 }
 
-function copyToClipboard(text, message) {
-
-    console.log("Trying to copy:", text);
-
-    navigator.clipboard.writeText(text)
-        .then(() => {
-            console.log("Copied!");
-            alert(message);
-        })
-        .catch(err => {
-            console.error("Clipboard error:", err);
-
-            // fallback method
-            const textarea = document.createElement("textarea");
-            textarea.value = text;
-            document.body.appendChild(textarea);
-            textarea.select();
-
-            try {
-                document.execCommand("copy");
-                alert(message);
-            } catch (e) {
-                alert("Copy failed");
-            }
-
-            document.body.removeChild(textarea);
-        });
+async function copyToClipboard(text, message) {
+    try {
+        await navigator.clipboard.writeText(text);
+        showToast(message);
+    } catch {
+        const textarea = document.createElement("textarea");
+        textarea.value = text;
+        document.body.appendChild(textarea);
+        textarea.select();
+        const copied = document.execCommand("copy");
+        textarea.remove();
+        showToast(copied ? message : "Copy failed");
+    }
 }
-
-
-/* =========================
-FILL TASK (EXAMPLE PROMPTS)
-========================= */
 
 function fillTask(btn, text) {
-
-    if (btn) {
-        document.querySelectorAll(".ex-btn")
-            .forEach(b => b.classList.remove("active"));
-
-        btn.classList.add("active");
-    }
-
-    const input = document.getElementById("task-input");
-    if (input) input.value = text;
+    document.querySelectorAll(".ex-btn").forEach(button => button.classList.remove("active"));
+    if (btn) btn.classList.add("active");
+    document.getElementById("task-input").value = text;
 }
 
-/* =========================
-RESET (KEEP ALL UI BLOCKS)
-========================= */
-function resetAll() {
-
+function resetAll(clearTask = false) {
     [
-        "plan-section",
-        "log-section",
-        "results-section",
-        "files-section",
-        "email-section",
-        "report-section",
-        "raw-section",
-        "error-box"
+        "plan-section", "log-section", "results-section", "files-section",
+        "email-section", "report-section", "raw-section", "error-box"
     ].forEach(hide);
 
-    document.getElementById("plan-steps").innerHTML = "";
-    document.getElementById("log-list").innerHTML = "";
-    document.getElementById("result-items").innerHTML = "";
-    document.getElementById("generated-files-list").innerHTML = "";
-    document.getElementById("email-preview-box").innerHTML = "";
-    document.getElementById("raw-output").textContent = "";
+    [
+        "plan-steps", "log-list", "result-items", "generated-files-list",
+        "email-preview-box", "report-preview-box", "raw-output", "error-msg"
+    ].forEach(id => {
+        document.getElementById(id).textContent = "";
+    });
 
-    const btn = document.getElementById("exec-btn");
-    btn.disabled = false;
-    btn.innerHTML = "Execute Task";
+    hide("copy-response-btn");
+    hide("copy-email-btn");
+    if (clearTask) {
+        document.getElementById("task-input").value = "";
+        document.querySelectorAll(".ex-btn").forEach(button => button.classList.remove("active"));
+    }
+    const button = document.getElementById("exec-btn");
+    button.disabled = false;
+    button.textContent = "Execute Task";
 }
 
-/* =========================
-LOGS
-========================= */
-function addLog(msg, state = "running") {
+function addLog(message, state = "running") {
     show("log-section");
-
-    const div = document.createElement("div");
-    div.className = "log-entry " + state;
-
-    div.innerHTML = `<strong>${state.toUpperCase()}</strong><br>${escapeHtml(msg)}`;
-
-    document.getElementById("log-list").appendChild(div);
+    const entry = document.createElement("div");
+    entry.className = `log-entry ${state}`;
+    entry.innerHTML = `<strong>${escapeHtml(state.toUpperCase())}</strong><br>${escapeHtml(message)}`;
+    document.getElementById("log-list").appendChild(entry);
 }
 
-/* =========================
-PLAN
-========================= */
-function renderPlan(plan) {
+function renderPlan(plan = []) {
     show("plan-section");
-
     const container = document.getElementById("plan-steps");
-    container.innerHTML = "";
-
-    plan.forEach(p => {
+    container.textContent = "";
+    plan.forEach(item => {
         const card = document.createElement("div");
         card.className = "plan-step";
-
+        const actions = (item.actions || []).map(action => {
+            const label = action.instruction || action;
+            const type = action.type ? `<span class="action-type">${escapeHtml(action.type)}</span> ` : "";
+            return `<li>${type}${escapeHtml(label)}</li>`;
+        }).join("");
         card.innerHTML = `
-            <h4>Step ${p.step}</h4>
-            <p><b>${escapeHtml(p.subtask)}</b></p>
-            <ul>
-                ${p.actions.map(a => `<li>${escapeHtml(a)}</li>`).join("")}
-            </ul>
+            <h4>Step ${escapeHtml(item.step)}</h4>
+            <p><b>${escapeHtml(item.subtask)}</b></p>
+            <ul>${actions}</ul>
         `;
-
         container.appendChild(card);
     });
 }
 
-/* =========================
-RESULTS
-========================= */
 function renderResults(data) {
-
     show("results-section");
-
     const container = document.getElementById("result-items");
-    container.innerHTML = "";
-
+    container.textContent = "";
     (data.execution_results || []).forEach(step => {
-
         const card = document.createElement("div");
         card.className = "result-item";
-
-        let html = `
-            <h4>Step ${step.step}</h4>
+        card.innerHTML = `
+            <h4>Step ${escapeHtml(step.step)}</h4>
             <p><b>${escapeHtml(step.subtask)}</b></p>
         `;
 
-        step.results.forEach(r => {
-            if (typeof r === "string") {
-                html += `<div>${escapeHtml(r)}</div>`;
-            } else {
-                html += `<pre>${escapeHtml(JSON.stringify(r, null, 2))}</pre>`;
-            }
-        });
+        (step.results || []).forEach(result => {
+            const resultBlock = document.createElement("div");
+            resultBlock.className = "typed-result";
 
-        card.innerHTML = html;
+            const type = document.createElement("span");
+            type.className = "result-type";
+            type.textContent = result.type || "result";
+            resultBlock.appendChild(type);
+
+            const content = document.createElement("div");
+            content.className = "result-content formatted-response compact-response";
+            if (typeof result.content === "string") {
+                renderFormattedText(content, result.content);
+            } else if (result.content !== undefined) {
+                const pre = document.createElement("pre");
+                pre.textContent = JSON.stringify(result.content, null, 2);
+                content.appendChild(pre);
+            } else {
+                content.textContent = result.message || "Completed";
+            }
+            resultBlock.appendChild(content);
+            card.appendChild(resultBlock);
+        });
         container.appendChild(card);
     });
 }
 
-/* =========================
-FILES
-========================= */
+function renderAgentReport(data) {
+    const summary = (data.execution_results || [])
+        .flatMap(step => step.results || [])
+        .filter(result => result.type === "summary" && typeof result.content === "string")
+        .at(-1);
+
+    if (!summary) {
+        hide("report-section");
+        return;
+    }
+
+    show("report-section");
+    hide("copy-response-btn");
+    renderFormattedText(document.getElementById("report-preview-box"), summary.content);
+}
+
 function renderDownloads(data) {
-
-    const grid = document.getElementById("generated-files-list");
-    grid.innerHTML = "";
-
-    let files = [];
-
-    (data.execution_results || []).forEach(step => {
-        step.results.forEach(r => {
-            if (r && typeof r === "object" && r.file_path) {
-                files.push(r.file_path);
-            }
-        });
-    });
-
-    files = [...new Set(files)];
-
-    if (files.length === 0) {
+    const container = document.getElementById("generated-files-list");
+    container.textContent = "";
+    const uniqueFiles = [...new Map(
+        (data.files || []).map(file => [file.filename, file])
+    ).values()];
+    if (!uniqueFiles.length) {
         hide("files-section");
         return;
     }
-
     show("files-section");
-
-    files.forEach(path => {
-
-        const filename = path.split("\\").pop();
-
-        const a = document.createElement("a");
-        a.className = "dl-btn";
-        a.href = `${API()}/download/${filename}?t=${Date.now()}`;
-        a.target = "_blank";
-        a.download = filename;
-        a.innerHTML = "⬇ Download " + filename;
-
-        grid.appendChild(a);
+    uniqueFiles.forEach(file => {
+        const link = document.createElement("a");
+        link.className = "dl-btn";
+        link.href = `${API()}${file.download_url}`;
+        link.download = file.filename;
+        link.textContent = `⬇ Download ${file.filename}`;
+        container.appendChild(link);
     });
 }
 
-/* =========================
-EMAIL
-========================= */
 function renderEmail(data) {
-
-    let email = null;
-
-    (data.execution_results || []).forEach(step => {
-        step.results.forEach(r => {
-            if (typeof r === "string" &&
-                r.toLowerCase().includes("subject")) {
-                email = r;
-            }
-        });
-    });
-
-    if (!email) return;
-
-    show("email-section");
-
-    const box = document.getElementById("email-preview-box");
-    box.innerHTML = "";
-
-    const btn = document.createElement("copy-btn");
-    btn.className = "copy-btn";
-    btn.textContent = "📋 Copy Email";
-
-    btn.addEventListener("click", () => {
-        console.log("EMAIL CLICKED");
-        copyToClipboard(email, "Email copied successfully");
-    });
-
-    const pre = document.createElement("pre");
-    pre.textContent = email;
-
-    box.appendChild(btn);
-    box.appendChild(pre);
-}
-/* =========================
-EXECUTE TASK (FIXED FLOW)
-========================= */
-async function runTask() {
-
-    const task = document.getElementById("task-input").value.trim();
-
-    if (!task) {
-        alert("Enter a task first.");
+    const emailResult = (data.execution_results || [])
+        .flatMap(step => step.results || [])
+        .find(result => result.type === "email" && typeof result.content === "string");
+    if (!emailResult) {
+        hide("email-section");
         return;
     }
+    show("email-section");
+    const pre = document.createElement("pre");
+    pre.textContent = emailResult.content;
+    document.getElementById("email-preview-box").replaceChildren(pre);
+    const button = document.getElementById("copy-email-btn");
+    show("copy-email-btn");
+    button.onclick = () => copyToClipboard(emailResult.content, "Email copied successfully");
+}
 
-    resetAll();
-
-    const btn = document.getElementById("exec-btn");
-    btn.disabled = true;
-    btn.innerHTML = "Running...";
-
+async function parseResponse(response) {
+    const text = await response.text();
+    let data = {};
     try {
+        data = text ? JSON.parse(text) : {};
+    } catch {
+        if (!response.ok) throw new Error(`Request failed with HTTP ${response.status}`);
+        throw new Error("The API returned an invalid response.");
+    }
+    if (!response.ok) {
+        const detail = typeof data.detail === "string" ? data.detail : null;
+        throw new Error(data.error?.message || detail || `Request failed with HTTP ${response.status}`);
+    }
+    return data;
+}
 
+async function runTask() {
+    const task = document.getElementById("task-input").value.trim();
+    if (!task) {
+        showToast("Enter a task first.");
+        return;
+    }
+    resetAll(false);
+    const button = document.getElementById("exec-btn");
+    button.disabled = true;
+    button.textContent = "Running...";
+    try {
         addLog("Executing task");
-
-        const res = await fetch(API() + "/execute", {
+        const response = await fetch(API() + "/execute", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ task })
         });
-
-        const data = await res.json();
-
-        /* ================= CHAT MODE ================= */
+        const data = await parseResponse(response);
         if (data.mode === "chat") {
-
             show("report-section");
-
-            document.getElementById("report-preview-box").textContent = data.answer;
-
-            document.getElementById("copy-response-btn").classList.remove("section-hidden");
-
-            document.getElementById("copy-response-btn")
-                .onclick = () => {
-                copyToClipboard(data.answer, "Response copied successfully");
-            };
-
-            show("raw-section");
-            document.getElementById("raw-output").textContent =
-                JSON.stringify(data, null, 2);
-
+            renderFormattedText(document.getElementById("report-preview-box"), data.answer);
+            const copyButton = document.getElementById("copy-response-btn");
+            show("copy-response-btn");
+            copyButton.onclick = () => copyToClipboard(data.answer, "Response copied successfully");
             addLog("Answer generated", "done");
-
-            return;
+        } else {
+            renderAgentReport(data);
+            renderEmail(data);
+            renderDownloads(data);
+            renderPlan(data.plan);
+            renderResults(data);
+            addLog("Execution completed", "done");
         }
-
-        /* ================= AGENT MODE ================= */
-        renderPlan(data.plan);
-        renderResults(data);
-        renderDownloads(data);
-        renderEmail(data);
-
         show("raw-section");
-        document.getElementById("raw-output").textContent =
-            JSON.stringify(data, null, 2);
-
-        addLog("Execution completed", "done");
-
-    } catch (err) {
-
+        document.getElementById("raw-output").textContent = JSON.stringify(data, null, 2);
+    } catch (error) {
         show("error-box");
-        document.getElementById("error-msg").innerHTML = err.message;
-        addLog(err.message, "error");
-
+        document.getElementById("error-msg").textContent = error.message;
+        addLog(error.message, "error");
     } finally {
-        btn.disabled = false;
-        btn.innerHTML = "Execute Task";
-
+        button.disabled = false;
+        button.textContent = "Execute Task";
     }
-
-    
 }
-

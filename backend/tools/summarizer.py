@@ -1,17 +1,12 @@
-from langchain_groq import ChatGroq
-from dotenv import load_dotenv
-import os
-
-load_dotenv()
-
-llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
-    groq_api_key=os.getenv("GROQ_API_KEY")
-)
+try:
+    from ..config import get_llm, map_provider_error
+    from ..errors import AppError
+except ImportError:
+    from config import get_llm, map_provider_error
+    from errors import AppError
 
 
-def summarize_research(research_data, task):
-
+def summarize_research(research_data, task: str) -> str:
     prompt = f"""
 You are a professional research summarizer.
 
@@ -23,14 +18,18 @@ Research Data:
 
 Instructions:
 - Summarize the research clearly and professionally.
-- Remove links/source formatting.
-- Make it human readable.
-- Keep only useful information.
-- If task asks for list/table, structure accordingly.
-
-Return only final summarized content.
+- Do not invent facts that are absent from the research data.
+- Remove raw link formatting while retaining useful source names.
+- If the task asks for a list or table, structure the result accordingly.
+- Format the response as clean Markdown for display in a web interface.
+- Start with a concise descriptive heading, use short paragraphs, and use
+  subheadings, bullet lists, numbered steps, or a table when they improve clarity.
+- Do not wrap the response in a Markdown code fence.
+- Return only the final content.
 """
-
-    response = llm.invoke(prompt)
-
-    return response.content
+    try:
+        return get_llm().invoke(prompt).content
+    except AppError:
+        raise
+    except Exception as exc:
+        raise map_provider_error(exc) from exc

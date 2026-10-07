@@ -1,142 +1,163 @@
-from openpyxl.styles import Font
+import os
+import re
+from pathlib import Path
+from uuid import uuid4
+from xml.sax.saxutils import escape
 
-from reportlab.pdfgen import canvas
 from docx import Document
 from openpyxl import Workbook
-import os
-from fpdf import FPDF
+from openpyxl.styles import Font
+from reportlab.lib.enums import TA_LEFT
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
 
-def generate_document(content: str, file_type: str):
-    OUTPUT_DIR = "generated"
+try:
+    from ..config import GENERATED_DIR
+    from ..errors import DocumentGenerationError
+except ImportError:
+    from config import GENERATED_DIR
+    from errors import DocumentGenerationError
 
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-    filename = os.path.join(
-        OUTPUT_DIR,
-        f"generated_file.{file_type}"
+SUPPORTED_TYPES = {"pdf", "docx", "xlsx"}
+FONT_CANDIDATES = (
+    Path(os.getenv("VIRTUALMATE_PDF_FONT", "")),
+    Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+    Path("/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf"),
+)
+FONT_BOLD_CANDIDATES = (
+    Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+    Path("/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"),
+)
+
+
+def _bold_segments(text: str) -> list[tuple[str, bool]]:
+    parts = re.split(r"(\*\*.*?\*\*)", text)
+    return [
+        (part[2:-2], True) if part.startswith("**") and part.endswith("**") else (part, False)
+        for part in parts
+        if part
+    ]
+
+
+def _register_pdf_fonts() -> tuple[str, str]:
+    regular = next((path for path in FONT_CANDIDATES if path and path.is_file()), None)
+    bold = next((path for path in FONT_BOLD_CANDIDATES if path.is_file()), None)
+    if regular:
+        pdfmetrics.registerFont(TTFont("VirtualMateSans", str(regular)))
+        if bold:
+            pdfmetrics.registerFont(TTFont("VirtualMateSans-Bold", str(bold)))
+        else:
+            pdfmetrics.registerFont(TTFont("VirtualMateSans-Bold", str(regular)))
+        return "VirtualMateSans", "VirtualMateSans-Bold"
+    return "Helvetica", "Helvetica-Bold"
+
+
+def _pdf_markup(line: str, unicode_font: bool) -> str:
+    if not unicode_font:
+        line = line.encode("latin-1", errors="replace").decode("latin-1")
+    return "".join(
+        f"<b>{escape(text)}</b>" if is_bold else escape(text)
+        for text, is_bold in _bold_segments(line)
     )
-    
-    # Remove existing file if it exists to avoid permission errors
-    if os.path.exists(filename):
-        try:
-            os.remove(filename)
-        except OSError:
-            pass
 
-    def parse_bold_segments(text: str):
-        segments = []
-        index = 0
-        while index < len(text):
-            if text.startswith("**", index):
-                end_index = text.find("**", index + 2)
-                if end_index == -1:
-                    segments.append((text[index:], False))
-                    break
-                bold_text = text[index + 2:end_index]
-                segments.append((bold_text, True))
-                index = end_index + 2
-            else:
-                next_bold = text.find("**", index)
-                if next_bold == -1:
-                    segments.append((text[index:], False))
-                    break
-                segments.append((text[index:next_bold], False))
-                index = next_bold
-        return segments
 
-    # if file_type == "pdf":
-    #     c = canvas.Canvas(filename)
+def _generate_pdf(content: str, filename: Path) -> None:
+    regular_font, bold_font = _register_pdf_fonts()
+    styles = getSampleStyleSheet()
+    body = ParagraphStyle(
+        "VirtualMateBody",
+        parent=styles["BodyText"],
+        fontName=regular_font,
+        fontSize=10.5,
+        leading=15,
+        alignment=TA_LEFT,
+        spaceAfter=5,
+    )
+    pdfmetrics.registerFontFamily(
+        "VirtualMateSans" if regular_font == "VirtualMateSans" else "Helvetica",
+        normal=regular_font,
+        bold=bold_font,
+    )
+    story = []
+    for line in str(content).splitlines() or [""]:
+        if not line.strip():
+            story.append(Spacer(1, 5 * mm))
+            continue
+        story.append(Paragraph(_pdf_markup(line, regular_font == "VirtualMateSans"), body))
 
-    #     y = 800
-    #     for line in content.split("\n"):
-    #         c.drawString(50, y, line[:100])
-    #         y -= 20
+    document = SimpleDocTemplate(
+        str(filename),
+        pagesize=A4,
+        rightMargin=18 * mm,
+        leftMargin=18 * mm,
+        topMargin=18 * mm,
+        bottomMargin=18 * mm,
+        title="VirtualMate Generated Report",
+    )
+    document.build(story)
 
-    #     c.save()
-    
-    if file_type == "pdf":
-        #filename = f"generated_file.pdf"
-        pdf = FPDF()
 
-        pdf.set_auto_page_break(auto=True, margin=15)
-        pdf.add_page()
-        pdf.set_font("Arial", size=12)
-        lines = str(content).split("\n")
-        for line in lines:
-            if line.strip() == "":
-                pdf.ln(10)
+def _generate_docx(content: str, filename: Path) -> None:
+    document = Document()
+    for line in str(content).splitlines():
+        paragraph = document.add_paragraph()
+        for text, is_bold in _bold_segments(line):
+            paragraph.add_run(text).bold = is_bold
+    document.save(filename)
+
+
+def _generate_xlsx(content: str, filename: Path) -> None:
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "VirtualMate Report"
+    row_number = 1
+
+    for raw_line in str(content).splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("|") and line.endswith("|"):
+            cells = [cell.strip() for cell in line.strip("|").split("|")]
+            if all(re.fullmatch(r":?-{3,}:?", cell) for cell in cells):
                 continue
+            for column, value in enumerate(cells, start=1):
+                cell = worksheet.cell(row=row_number, column=column, value=value)
+                if row_number == 1:
+                    cell.font = Font(bold=True)
+        else:
+            worksheet.cell(row=row_number, column=1, value=line)
+        row_number += 1
+    workbook.save(filename)
 
-            segments = parse_bold_segments(line)
-            for segment_text, is_bold in segments:
-                pdf.set_font("Arial", style="B" if is_bold else "", size=12)
-                pdf.write(10, segment_text)
-            pdf.ln(10)
-        try:
-            pdf.output(filename)
-        except Exception as e:
-            return {
-                "error": str(e)
-        }
-        #pdf.output(filename)
-        
 
-    elif file_type == "docx":
-        doc = Document()
+def generate_document(content: str, file_type: str) -> dict[str, str]:
+    file_type = file_type.lower()
+    if file_type not in SUPPORTED_TYPES:
+        raise DocumentGenerationError(f"Unsupported document type: {file_type}")
 
-        for line in content.split("\n"):
-            paragraph = doc.add_paragraph()
-            segments = parse_bold_segments(line)
-            for segment_text, is_bold in segments:
-                run = paragraph.add_run(segment_text)
-                if is_bold:
-                    run.bold = True
+    GENERATED_DIR.mkdir(parents=True, exist_ok=True)
+    filename = GENERATED_DIR / f"virtualmate_{uuid4().hex[:12]}.{file_type}"
 
-        doc.save(filename)
+    try:
+        if file_type == "pdf":
+            _generate_pdf(content, filename)
+        elif file_type == "docx":
+            _generate_docx(content, filename)
+        else:
+            _generate_xlsx(content, filename)
+    except Exception as exc:
+        filename.unlink(missing_ok=True)
+        raise DocumentGenerationError(
+            f"Could not generate the requested {file_type.upper()} file."
+        ) from exc
 
-    elif file_type == "xlsx":
-        wb = Workbook()
-        ws = wb.active
-
-        row_num = 1
-
-        for line in content.splitlines():
-
-            line = line.strip()
-
-            if not line:
-                continue
-
-            # Markdown Table
-            if "|" in line and line.startswith("|") and line.endswith("|"):
-                cells = [cell.strip() for cell in line.strip("|").split("|")]
-
-                # Skip separator row
-                if all(set(cell) <= {"-"} for cell in cells):
-                    continue
-
-                for col_num, value in enumerate(cells, start=1):
-                    cell = ws.cell(row=row_num, column=col_num)
-                    cell.value = value
-
-                    if row_num == 1:
-                        cell.font = Font(bold=True)
-
-                row_num += 1
-
-            # Regular text
-            else:
-                ws.cell(row=row_num, column=1, value=line)
-                row_num += 1
-
-        wb.save(filename)
-
-    else:
-        return {"error": "Unsupported file type"}
-
-    print("Saved:", os.path.abspath(filename))
-    
     return {
-        "message": f"{file_type.upper()} Generated Successfully",
-        "file_path": os.path.abspath(filename)
+        "message": f"{file_type.upper()} generated successfully",
+        "filename": filename.name,
+        "download_url": f"/download/{filename.name}",
     }

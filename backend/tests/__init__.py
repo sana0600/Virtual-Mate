@@ -1,0 +1,1 @@
+"""VirtualMate regression tests."""
